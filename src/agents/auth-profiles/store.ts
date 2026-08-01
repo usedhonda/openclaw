@@ -191,6 +191,34 @@ type ExternalCliSyncResult = {
   cacheable: boolean;
 };
 
+function buildAuthProfileSaveAuditProfiles(
+  store: AuthProfileStore,
+): Array<Record<string, unknown>> {
+  return Object.entries(store.profiles)
+    .map(([profileId, credential]) => {
+      const raw = credential as Record<string, unknown>;
+      return {
+        profileId,
+        provider: typeof raw.provider === "string" ? raw.provider : null,
+        type: typeof raw.type === "string" ? raw.type : null,
+        hasInlineAccess: typeof raw.access === "string" && raw.access.length > 0,
+        hasInlineRefresh: typeof raw.refresh === "string" && raw.refresh.length > 0,
+        hasInlineIdToken: typeof raw.idToken === "string" && raw.idToken.length > 0,
+        hasOauthRef: raw.oauthRef !== undefined && raw.oauthRef !== null,
+        hasExpiresAt: raw.expires_at !== undefined && raw.expires_at !== null,
+        hasExpires: raw.expires !== undefined && raw.expires !== null,
+      };
+    })
+    .sort((left, right) => String(left.profileId).localeCompare(String(right.profileId)));
+}
+
+function buildAuthProfileSaveAuditMetadata(store: AuthProfileStore): Record<string, unknown> {
+  return {
+    profileCount: Object.keys(store.profiles).length,
+    profiles: buildAuthProfileSaveAuditProfiles(store),
+  };
+}
+
 let runtimeSnapshotPublisherForTest: ((publish: () => void) => void) | undefined;
 
 function publishRuntimeSnapshotsAfterCommit(publish: (() => void) | undefined): boolean {
@@ -1371,12 +1399,25 @@ function saveAuthProfileStoreInTransaction(
         localStore,
       )
     : undefined;
+  log.info("auth profile store save begin", {
+    agentDir: agentDir ?? null,
+    caller: "saveAuthProfileStore",
+    hasDatabase: Boolean(database),
+    local: buildAuthProfileSaveAuditMetadata(localStore),
+    persisted: buildAuthProfileSaveAuditMetadata(payload),
+  });
   if (credentialsChanged) {
     writePersistedAuthProfileStoreRaw(payload, agentDir, database);
   }
   if (stateChanged) {
     writePersistedAuthProfileStateRaw(statePayload, agentDir, database);
   }
+  log.info("auth profile store save complete", {
+    agentDir: agentDir ?? null,
+    caller: "saveAuthProfileStore",
+    hasDatabase: Boolean(database),
+    persisted: buildAuthProfileSaveAuditMetadata(payload),
+  });
   const publishRuntimeSnapshots = () => {
     // Main-store publication invalidates derived stores. Capture the latest
     // overlays at the publication edge so post-commit refreshes are retained.
